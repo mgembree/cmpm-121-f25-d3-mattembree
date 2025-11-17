@@ -248,6 +248,4 @@ drawCellsInView();
 map.on("moveend", () => drawCellsInView());
 
 // Also redraw if player marker is moved (future step)
-
-// Expose a simple API for future steps
 export { drawCellsInView, map, playerMarker };
