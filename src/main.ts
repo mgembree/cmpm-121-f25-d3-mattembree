@@ -1,18 +1,12 @@
 // @deno-types="npm:@types/leaflet"
 import leaflet from "leaflet";
 
-// Style sheets
-import "leaflet/dist/leaflet.css"; // supporting style for Leaflet
-import "./style.css"; // student-controlled page style
-
-// Fix missing marker images
-import "./_leafletWorkaround.ts"; // fixes for missing Leaflet images
-
-// Import our luck function
+import "leaflet/dist/leaflet.css";
+import "./_leafletWorkaround.ts";
 import luck from "./_luck.ts";
+import "./style.css";
 
-// Create basic UI elements
-
+// Basic UI: control panel, map, status
 const controlPanelDiv = document.createElement("div");
 controlPanelDiv.id = "controlPanel";
 document.body.append(controlPanelDiv);
@@ -25,29 +19,28 @@ const statusPanelDiv = document.createElement("div");
 statusPanelDiv.id = "statusPanel";
 document.body.append(statusPanelDiv);
 
-// Our classroom location
+// Classroom origin: tile indices are computed relative to this point
 const CLASSROOM_LATLNG = leaflet.latLng(
   36.997936938057016,
   -122.05703507501151,
 );
 
-// Tunable gameplay parameters
-const GAMEPLAY_ZOOM_LEVEL = 19;
-const TILE_DEGREES = 1e-4;
-const NEIGHBORHOOD_SIZE = 8;
-const CACHE_SPAWN_PROBABILITY = 0.1;
+// Tunables for the map grid
+const TILE_DEGREES = 1e-4; // size of a cell in degrees
+const INTERACTION_RADIUS = 2; // in cell units (Chebyshev distance)
+const SPAWN_PROBABILITY = 0.12; // deterministic spawn chance via luck()
 
-// Create the map (element with id "map" is defined in index.html)
+// Create the map: allow panning; fix zoom to keep cell scale stable
+const MAP_ZOOM = 19;
 const map = leaflet.map(mapDiv, {
   center: CLASSROOM_LATLNG,
-  zoom: GAMEPLAY_ZOOM_LEVEL,
-  minZoom: GAMEPLAY_ZOOM_LEVEL,
-  maxZoom: GAMEPLAY_ZOOM_LEVEL,
+  zoom: MAP_ZOOM,
+  minZoom: MAP_ZOOM,
+  maxZoom: MAP_ZOOM,
   zoomControl: false,
-  scrollWheelZoom: false,
+  scrollWheelZoom: true,
 });
 
-// Populate the map with a background tile layer
 leaflet
   .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
@@ -56,60 +49,94 @@ leaflet
   })
   .addTo(map);
 
-// Add a marker to represent the player
-const playerMarker = leaflet.marker(CLASSROOM_LATLNG);
-playerMarker.bindTooltip("That's you!");
+// Player marker (represents where interactions are allowed around)
+const playerMarker = leaflet.marker(CLASSROOM_LATLNG, { interactive: false });
+playerMarker.bindTooltip("You (interaction center)");
 playerMarker.addTo(map);
 
-// Display the player's points
-let playerPoints = 0;
-statusPanelDiv.innerHTML = "No points yet...";
+statusPanelDiv.innerText = "Map initialized — showing deterministic cells.";
 
-// Add caches to the map by cell numbers
-function spawnCache(i: number, j: number) {
-  // Convert cell numbers into lat/lng bounds
-  const origin = CLASSROOM_LATLNG;
-  const bounds = leaflet.latLngBounds([
+// LayerGroup to hold currently visible cell rectangles
+const cellsLayer = leaflet.layerGroup().addTo(map);
+
+function latLngToCell(origin: leaflet.LatLng, latlng: leaflet.LatLng) {
+  const i = Math.floor((latlng.lat - origin.lat) / TILE_DEGREES);
+  const j = Math.floor((latlng.lng - origin.lng) / TILE_DEGREES);
+  return { i, j };
+}
+
+function cellBounds(origin: leaflet.LatLng, i: number, j: number) {
+  return leaflet.latLngBounds([
     [origin.lat + i * TILE_DEGREES, origin.lng + j * TILE_DEGREES],
     [origin.lat + (i + 1) * TILE_DEGREES, origin.lng + (j + 1) * TILE_DEGREES],
   ]);
-
-  // Add a rectangle to the map to represent the cache
-  const rect = leaflet.rectangle(bounds);
-  rect.addTo(map);
-
-  // Handle interactions with the cache
-  rect.bindPopup(() => {
-    // Each cache has a random point value, mutable by the player
-    let pointValue = Math.floor(luck([i, j, "initialValue"].toString()) * 100);
-
-    // The popup offers a description and button
-    const popupDiv = document.createElement("div");
-    popupDiv.innerHTML = `
-                <div>There is a cache here at "${i},${j}". It has value <span id="value">${pointValue}</span>.</div>
-                <button id="poke">poke</button>`;
-
-    // Clicking the button decrements the cache's value and increments the player's points
-    popupDiv
-      .querySelector<HTMLButtonElement>("#poke")!
-      .addEventListener("click", () => {
-        pointValue--;
-        popupDiv.querySelector<HTMLSpanElement>("#value")!.innerHTML =
-          pointValue.toString();
-        playerPoints++;
-        statusPanelDiv.innerHTML = `${playerPoints} points accumulated`;
-      });
-
-    return popupDiv;
-  });
 }
 
-// Look around the player's neighborhood for caches to spawn
-for (let i = -NEIGHBORHOOD_SIZE; i < NEIGHBORHOOD_SIZE; i++) {
-  for (let j = -NEIGHBORHOOD_SIZE; j < NEIGHBORHOOD_SIZE; j++) {
-    // If location i,j is lucky enough, spawn a cache!
-    if (luck([i, j].toString()) < CACHE_SPAWN_PROBABILITY) {
-      spawnCache(i, j);
+function drawCellsInView() {
+  cellsLayer.clearLayers();
+  const bounds = map.getBounds();
+  const origin = CLASSROOM_LATLNG;
+
+  const iMin = Math.floor((bounds.getSouth() - origin.lat) / TILE_DEGREES);
+  const iMax = Math.floor((bounds.getNorth() - origin.lat) / TILE_DEGREES);
+  const jMin = Math.floor((bounds.getWest() - origin.lng) / TILE_DEGREES);
+  const jMax = Math.floor((bounds.getEast() - origin.lng) / TILE_DEGREES);
+
+  const playerCell = latLngToCell(origin, playerMarker.getLatLng());
+
+  for (let i = iMin; i <= iMax; i++) {
+    for (let j = jMin; j <= jMax; j++) {
+      const boundsRect = cellBounds(origin, i, j);
+
+      // deterministic: whether this cell contains a token
+      const hasToken = luck([i, j, "token"].toString()) < SPAWN_PROBABILITY;
+      const tokenValue = Math.floor(luck([i, j, "value"].toString()) * 100);
+
+      // interactive if within INTERACTION_RADIUS of player cell
+      const cheb = Math.max(
+        Math.abs(i - playerCell.i),
+        Math.abs(j - playerCell.j),
+      );
+      const interactive = cheb <= INTERACTION_RADIUS;
+
+      const rect = leaflet.rectangle(boundsRect, {
+        color: interactive ? "#1f78b4" : "#888",
+        weight: interactive ? 1.5 : 0.8,
+        fillColor: hasToken ? "orange" : "transparent",
+        fillOpacity: hasToken ? 0.6 : 0.0,
+        interactive: true,
+      });
+
+      rect.addTo(cellsLayer);
+
+      // Popup content: deterministic info about this cell
+      const popup = `<div>Cell <strong>${i},${j}</strong><br/>` +
+        (hasToken ? `Token: <strong>${tokenValue}</strong>` : `Empty`) +
+        (interactive
+          ? `<br/><em>Within interaction range</em>`
+          : `<br/><em>Too far</em>`) +
+        `</div>`;
+
+      rect.bindPopup(popup);
+
+      // Click behavior: only allow actions when interactive
+      rect.on("click", () => {
+        if (!interactive) {
+          rect.openPopup();
+          return;
+        }
+        // For step 1 we only show popup and visually indicate interactivity
+        rect.openPopup();
+      });
     }
   }
 }
+
+// Draw cells initially and when the map is moved
+drawCellsInView();
+map.on("moveend", () => drawCellsInView());
+
+// Also redraw if player marker is moved (future step)
+
+// Expose a simple API for future steps
+export { drawCellsInView, map, playerMarker };
