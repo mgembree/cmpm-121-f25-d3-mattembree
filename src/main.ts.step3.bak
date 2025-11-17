@@ -1,3 +1,6 @@
+// Backup before implementing Step 3 (crafting)
+// This file is a copy of src/main.ts as of Step 2 implementation.
+
 // @deno-types="npm:@types/leaflet"
 import leaflet from "leaflet";
 
@@ -49,29 +52,25 @@ leaflet
   })
   .addTo(map);
 
-// Player marker (represents where interactions are allowed around)
+// Player marker (represents where interactions are allowed)
 const playerMarker = leaflet.marker(CLASSROOM_LATLNG, { interactive: false });
 playerMarker.bindTooltip("You (interaction center)");
 playerMarker.addTo(map);
 
 statusPanelDiv.innerText = "Map initialized — showing deterministic cells.";
 
-// Inventory state
-type HeldToken = { value: number } | null;
-let heldToken: HeldToken = null;
+// Inventory state (Step 2)
+let heldToken = null;
 
 // Track cells from which tokens have been picked up this session
-const pickedUpCells = new Set<string>(); // keys are "i,j"
-// Track crafted or modified cell values in this session
-const craftedCells = new Map<string, number>();
+const pickedUpCells = new Set(); // keys are "i,j"
 
 function statusText() {
   return heldToken ? `Holding token: ${heldToken.value}` : `Holding: (empty)`;
 }
 
 function updateStatusPanel() {
-  statusPanelDiv.innerText =
-    `Map initialized — showing deterministic cells.\n${statusText()}`;
+  statusPanelDiv.innerText = `Map initialized — showing deterministic cells.\n${statusText()}`;
 }
 
 updateStatusPanel();
@@ -108,27 +107,9 @@ function drawCellsInView() {
     for (let j = jMin; j <= jMax; j++) {
       const boundsRect = cellBounds(origin, i, j);
 
-      // Determine runtime cell state (consider deterministic initial state,
-      // pickups, and crafted updates).
-      const key = `${i},${j}`;
-
-      // Initial deterministic state, with an explicit test override so two
-      // nearby cells have the same token value for testing crafting.
-      const initialHasToken =
-        luck([i, j, "token"].toString()) < SPAWN_PROBABILITY;
-      let initialValue: number | null = null;
-      if (initialHasToken) {
-        initialValue = Math.floor(luck([i, j, "value"].toString()) * 100);
-      }
-
-      // If craftedCells has an entry, that overrides the initial value
-      const craftedValue = craftedCells.get(key);
-      const currentlyHasToken = craftedValue !== undefined
-        ? true
-        : (initialHasToken && !pickedUpCells.has(key));
-      const tokenValue = craftedValue !== undefined
-        ? craftedValue
-        : initialValue;
+      // deterministic: whether this cell contains a token
+      const hasToken = luck([i, j, "token"].toString()) < SPAWN_PROBABILITY;
+      const tokenValue = Math.floor(luck([i, j, "value"].toString()) * 100);
 
       // interactive if within INTERACTION_RADIUS of player cell
       const cheb = Math.max(
@@ -140,8 +121,8 @@ function drawCellsInView() {
       const rect = leaflet.rectangle(boundsRect, {
         color: interactive ? "#1f78b4" : "#888",
         weight: interactive ? 1.5 : 0.8,
-        fillColor: currentlyHasToken ? "orange" : "transparent",
-        fillOpacity: currentlyHasToken ? 0.6 : 0.0,
+        fillColor: hasToken ? "orange" : "transparent",
+        fillOpacity: hasToken ? 0.6 : 0.0,
         interactive: true,
       });
 
@@ -149,9 +130,7 @@ function drawCellsInView() {
 
       // Popup content: deterministic info about this cell
       const popup = `<div>Cell <strong>${i},${j}</strong><br/>` +
-        (currentlyHasToken
-          ? `Token: <strong>${tokenValue}</strong>`
-          : `Empty`) +
+        (hasToken ? `Token: <strong>${tokenValue}</strong>` : `Empty`) +
         (interactive
           ? `<br/><em>Within interaction range</em>`
           : `<br/><em>Too far</em>`) +
@@ -159,84 +138,43 @@ function drawCellsInView() {
 
       rect.bindPopup(popup);
 
-      // Click behavior: allow pickup and crafting when interactive
+      // Click behavior: only allow actions when interactive
       rect.on("click", () => {
-        const clickKey = key;
-        const crafted = craftedCells.get(clickKey);
-        const initialHas = luck([i, j, "token"].toString()) < SPAWN_PROBABILITY;
-        const initialVal = Math.floor(luck([i, j, "value"].toString()) * 100);
-        const nowHas = crafted !== undefined
-          ? true
-          : (initialHas && !pickedUpCells.has(clickKey));
-        const nowValue = crafted !== undefined
-          ? crafted
-          : (initialHas ? initialVal : null);
+        const key = `${i},${j}`;
+
+        // recompute whether the cell currently has a token (account for pickups)
+        const initialHasToken = luck([i, j, "token"].toString()) < SPAWN_PROBABILITY;
+        const currentlyHasToken = initialHasToken && !pickedUpCells.has(key);
 
         if (!interactive) {
-          rect.bindPopup(
-            `<div>Cell <strong>${i},${j}</strong><br/>${
-              nowHas ? `Token: <strong>${nowValue}</strong>` : `Empty`
-            }<br/><em>Too far</em></div>`,
-          );
+          rect.bindPopup(`<div>Cell <strong>${i},${j}</strong><br/>${currentlyHasToken ? `Token: <strong>${tokenValue}</strong>` : `Empty`}<br/><em>Too far</em></div>`);
           rect.openPopup();
           return;
         }
 
-        // Pickup when not holding a token
-        if (nowHas && !heldToken) {
-          pickedUpCells.add(clickKey);
-          heldToken = { value: nowValue as number };
+        // If player is not holding a token and this cell has one, pick it up
+        if (currentlyHasToken && !heldToken) {
+          // pick up
+          pickedUpCells.add(key);
+          heldToken = { value: tokenValue };
           updateStatusPanel();
 
-          // Re-draw cells so all visuals update immediately
-          drawCellsInView();
+          // update rectangle style to remove the token fill
+          rect.setStyle({ fillOpacity: 0, fillColor: "transparent" });
 
-          // Show popup at the cell center
-          const center = cellBounds(CLASSROOM_LATLNG, i, j).getCenter();
-          leaflet.popup()
-            .setLatLng(center)
-            .setContent(
-              `<div>Cell <strong>${i},${j}</strong><br/>Picked up token: <strong>${nowValue}</strong></div>`,
-            )
-            .openOn(map);
+          rect.bindPopup(`<div>Cell <strong>${i},${j}</strong><br/>Picked up token: <strong>${tokenValue}</strong></div>`);
+          rect.openPopup();
           return;
         }
 
-        // Crafting: place held token onto a cell that has a token of equal value
-        if (heldToken && nowHas && nowValue === heldToken.value) {
-          const newVal = heldToken.value * 2;
-          pickedUpCells.add(clickKey);
-          // Remove any crafted override for this cell (if present)
-          craftedCells.delete(clickKey);
-
-          // Player now holds the new doubled token
-          heldToken = { value: newVal };
-          updateStatusPanel();
-
-          // Re-draw cells so the destination disappears immediately
-          drawCellsInView();
-
-          const center = cellBounds(CLASSROOM_LATLNG, i, j).getCenter();
-          leaflet.popup()
-            .setLatLng(center)
-            .setContent(
-              `<div>Cell <strong>${i},${j}</strong><br/>Combined and consumed — you now hold: <strong>${newVal}</strong></div>`,
-            )
-            .openOn(map);
-          return;
-        }
-
-        // If holding a token and cannot craft here, notify player
+        // If player is holding a token, show message (can't pick up more)
         if (heldToken) {
-          rect.bindPopup(
-            `<div>Cell <strong>${i},${j}</strong><br/>${
-              nowHas ? `Token: <strong>${nowValue}</strong><br/>` : `Empty<br/>`
-            }<em>You are holding a token (${heldToken.value}). To craft, click a cell with an equal token.</em></div>`,
-          );
+          rect.bindPopup(`<div>Cell <strong>${i},${j}</strong><br/>${currentlyHasToken ? `Token: <strong>${tokenValue}</strong><br/>` : `Empty<br/>`}<em>You are already holding a token (${heldToken.value}).</em></div>`);
           rect.openPopup();
           return;
         }
 
+        // Otherwise, just open the cell popup
         rect.openPopup();
       });
     }

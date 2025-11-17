@@ -1,0 +1,92 @@
+// Backup before removing the test override for crafting
+// This file is a copy of src/main.ts prior to removal of the (0,0)/(0,1) override
+
+// @deno-types="npm:@types/leaflet"
+import leaflet from "leaflet";
+
+import "leaflet/dist/leaflet.css";
+import "./_leafletWorkaround.ts";
+import luck from "./_luck.ts";
+import "./style.css";
+
+// Basic UI: control panel, map, status
+const controlPanelDiv = document.createElement("div");
+controlPanelDiv.id = "controlPanel";
+document.body.append(controlPanelDiv);
+
+const mapDiv = document.createElement("div");
+mapDiv.id = "map";
+document.body.append(mapDiv);
+
+const statusPanelDiv = document.createElement("div");
+statusPanelDiv.id = "statusPanel";
+document.body.append(statusPanelDiv);
+
+// Classroom origin: tile indices are computed relative to this point
+const CLASSROOM_LATLNG = leaflet.latLng(36.997936938057016, -122.05703507501151);
+
+// Tunables for the map grid
+const TILE_DEGREES = 1e-4; // size of a cell in degrees
+const INTERACTION_RADIUS = 2; // in cell units (Chebyshev distance)
+const SPAWN_PROBABILITY = 0.12; // deterministic spawn chance via luck()
+
+// Create the map: allow panning; fix zoom to keep cell scale stable
+const MAP_ZOOM = 19;
+const map = leaflet.map(mapDiv, {
+  center: CLASSROOM_LATLNG,
+  zoom: MAP_ZOOM,
+  minZoom: MAP_ZOOM,
+  maxZoom: MAP_ZOOM,
+  zoomControl: false,
+  scrollWheelZoom: true,
+});
+
+leaflet
+  .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  })
+  .addTo(map);
+
+// Player marker (represents where interactions are allowed around)
+const playerMarker = leaflet.marker(CLASSROOM_LATLNG, { interactive: false });
+playerMarker.bindTooltip("You (interaction center)");
+playerMarker.addTo(map);
+
+statusPanelDiv.innerText = "Map initialized — showing deterministic cells.";
+
+// Inventory state
+let heldToken = null;
+
+// Track cells from which tokens have been picked up this session
+const pickedUpCells = new Set(); // keys are "i,j"
+// Track crafted or modified cell values in this session
+const craftedCells = new Map();
+
+function statusText() {
+  return heldToken ? `Holding token: ${heldToken.value}` : `Holding: (empty)`;
+}
+
+function updateStatusPanel() {
+  statusPanelDiv.innerText = `Map initialized — showing deterministic cells.\n${statusText()}`;
+}
+
+updateStatusPanel();
+
+// LayerGroup to hold currently visible cell rectangles
+const cellsLayer = leaflet.layerGroup().addTo(map);
+
+function latLngToCell(origin, latlng) {
+  const i = Math.floor((latlng.lat - origin.lat) / TILE_DEGREES);
+  const j = Math.floor((latlng.lng - origin.lng) / TILE_DEGREES);
+  return { i, j };
+}
+
+function cellBounds(origin, i, j) {
+  return leaflet.latLngBounds([
+    [origin.lat + i * TILE_DEGREES, origin.lng + j * TILE_DEGREES],
+    [origin.lat + (i + 1) * TILE_DEGREES, origin.lng + (j + 1) * TILE_DEGREES],
+  ]);
+}
+
+// ... remaining code ...
