@@ -1,3 +1,6 @@
+// Backup before implementing Step 2 (inventory pickup)
+// This file is a copy of src/main.ts as of Step 1 implementation.
+
 // @deno-types="npm:@types/leaflet"
 import leaflet from "leaflet";
 
@@ -49,30 +52,12 @@ leaflet
   })
   .addTo(map);
 
-// Player marker (represents where interactions are allowed around)
+// Player marker (represents where interactions are allowed)
 const playerMarker = leaflet.marker(CLASSROOM_LATLNG, { interactive: false });
 playerMarker.bindTooltip("You (interaction center)");
 playerMarker.addTo(map);
 
 statusPanelDiv.innerText = "Map initialized — showing deterministic cells.";
-
-// Inventory state
-type HeldToken = { value: number } | null;
-let heldToken: HeldToken = null;
-
-// Track cells from which tokens have been picked up this session
-const pickedUpCells = new Set<string>(); // keys are "i,j"
-
-function statusText() {
-  return heldToken ? `Holding token: ${heldToken.value}` : `Holding: (empty)`;
-}
-
-function updateStatusPanel() {
-  statusPanelDiv.innerText =
-    `Map initialized — showing deterministic cells.\n${statusText()}`;
-}
-
-updateStatusPanel();
 
 // LayerGroup to hold currently visible cell rectangles
 const cellsLayer = leaflet.layerGroup().addTo(map);
@@ -139,56 +124,11 @@ function drawCellsInView() {
 
       // Click behavior: only allow actions when interactive
       rect.on("click", () => {
-        const key = `${i},${j}`;
-
-        // recompute whether the cell currently has a token (account for pickups)
-        const initialHasToken =
-          luck([i, j, "token"].toString()) < SPAWN_PROBABILITY;
-        const currentlyHasToken = initialHasToken && !pickedUpCells.has(key);
-
         if (!interactive) {
-          rect.bindPopup(
-            `<div>Cell <strong>${i},${j}</strong><br/>${
-              currentlyHasToken
-                ? `Token: <strong>${tokenValue}</strong>`
-                : `Empty`
-            }<br/><em>Too far</em></div>`,
-          );
           rect.openPopup();
           return;
         }
-
-        // If player is not holding a token and this cell has one, pick it up
-        if (currentlyHasToken && !heldToken) {
-          // pick up
-          pickedUpCells.add(key);
-          heldToken = { value: tokenValue };
-          updateStatusPanel();
-
-          // update rectangle style to remove the token fill
-          rect.setStyle({ fillOpacity: 0, fillColor: "transparent" });
-
-          rect.bindPopup(
-            `<div>Cell <strong>${i},${j}</strong><br/>Picked up token: <strong>${tokenValue}</strong></div>`,
-          );
-          rect.openPopup();
-          return;
-        }
-
-        // If player is holding a token, show message (can't pick up more)
-        if (heldToken) {
-          rect.bindPopup(
-            `<div>Cell <strong>${i},${j}</strong><br/>${
-              currentlyHasToken
-                ? `Token: <strong>${tokenValue}</strong><br/>`
-                : `Empty<br/>`
-            }<em>You are already holding a token (${heldToken.value}).</em></div>`,
-          );
-          rect.openPopup();
-          return;
-        }
-
-        // Otherwise, just open the cell popup
+        // For step 1 we only show popup and visually indicate interactivity
         rect.openPopup();
       });
     }
