@@ -11,6 +11,17 @@ const controlPanelDiv = document.createElement("div");
 controlPanelDiv.id = "controlPanel";
 document.body.append(controlPanelDiv);
 
+// Add movement buttons to control panel
+const movementDiv = document.createElement("div");
+movementDiv.innerHTML = `
+  <button id="north">⬆️ North</button>
+  <button id="south">⬇️ South</button>
+  <button id="west">⬅️ West</button>
+  <button id="east">➡️ East</button>
+  <button id="reset">🌐 Reset Position</button>
+`;
+controlPanelDiv.append(movementDiv);
+
 const mapDiv = document.createElement("div");
 mapDiv.id = "map";
 document.body.append(mapDiv);
@@ -78,6 +89,88 @@ updateStatusPanel();
 
 // LayerGroup to hold currently visible cell rectangles
 const cellsLayer = leaflet.layerGroup().addTo(map);
+
+// Movement step size (in degrees)
+const MOVEMENT_STEP = TILE_DEGREES * 1; // Move by 1 cell at a time
+
+// Move player marker and update map center
+function movePlayer(latOffset: number, lngOffset: number) {
+  const currentPos = playerMarker.getLatLng();
+  const newPos = leaflet.latLng(
+    currentPos.lat + latOffset,
+    currentPos.lng + lngOffset,
+  );
+  playerMarker.setLatLng(newPos);
+  map.panTo(newPos);
+
+  // Clean up cells that are no longer visible (memoryless behavior)
+  cleanupInvisibleCells();
+
+  // Redraw cells with updated interaction radius around new position
+  drawCellsInView();
+}
+
+// Clear state for cells that are outside the current viewport
+function cleanupInvisibleCells() {
+  const bounds = map.getBounds();
+  const origin = CLASSROOM_LATLNG;
+
+  const visibleIMin =
+    Math.floor((bounds.getSouth() - origin.lat) / TILE_DEGREES) - 1;
+  const visibleIMax =
+    Math.floor((bounds.getNorth() - origin.lat) / TILE_DEGREES) + 1;
+  const visibleJMin =
+    Math.floor((bounds.getWest() - origin.lng) / TILE_DEGREES) - 1;
+  const visibleJMax =
+    Math.floor((bounds.getEast() - origin.lng) / TILE_DEGREES) + 1;
+
+  // Remove picked-up cells that are outside visible range
+  for (const key of pickedUpCells) {
+    const [iStr, jStr] = key.split(",");
+    const i = parseInt(iStr);
+    const j = parseInt(jStr);
+    if (
+      i < visibleIMin || i > visibleIMax || j < visibleJMin || j > visibleJMax
+    ) {
+      pickedUpCells.delete(key);
+    }
+  }
+
+  // Remove crafted cells that are outside visible range
+  for (const key of craftedCells.keys()) {
+    const [iStr, jStr] = key.split(",");
+    const i = parseInt(iStr);
+    const j = parseInt(jStr);
+    if (
+      i < visibleIMin || i > visibleIMax || j < visibleJMin || j > visibleJMax
+    ) {
+      craftedCells.delete(key);
+    }
+  }
+}
+
+// Wire up movement buttons
+document.getElementById("north")!.addEventListener("click", () => {
+  movePlayer(MOVEMENT_STEP, 0);
+});
+
+document.getElementById("south")!.addEventListener("click", () => {
+  movePlayer(-MOVEMENT_STEP, 0);
+});
+
+document.getElementById("west")!.addEventListener("click", () => {
+  movePlayer(0, -MOVEMENT_STEP);
+});
+
+document.getElementById("east")!.addEventListener("click", () => {
+  movePlayer(0, MOVEMENT_STEP);
+});
+
+document.getElementById("reset")!.addEventListener("click", () => {
+  playerMarker.setLatLng(CLASSROOM_LATLNG);
+  map.setView(CLASSROOM_LATLNG, MAP_ZOOM);
+  drawCellsInView();
+});
 
 function latLngToCell(origin: leaflet.LatLng, latlng: leaflet.LatLng) {
   const i = Math.floor((latlng.lat - origin.lat) / TILE_DEGREES);
