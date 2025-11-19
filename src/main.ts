@@ -76,13 +76,38 @@ const pickedUpCells = new Set<string>(); // keys are "i,j"
 // Track crafted or modified cell values in this session
 const craftedCells = new Map<string, number>();
 
+// Win condition
+const WIN_THRESHOLD = 4096;
+let hasWon = false;
+
 function statusText() {
   return heldToken ? `Holding token: ${heldToken.value}` : `Holding: (empty)`;
 }
 
+function checkWinCondition() {
+  if (!hasWon && heldToken && heldToken.value >= WIN_THRESHOLD) {
+    hasWon = true;
+    statusPanelDiv.innerText =
+      `🎉 VICTORY! You crafted a token worth ${heldToken.value}! 🎉\n${statusText()}`;
+
+    // Show victory popup
+    leaflet.popup()
+      .setLatLng(playerMarker.getLatLng())
+      .setContent(
+        `<div style="text-align: center; font-size: 1.2em;"><strong>🎉 VICTORY! 🎉</strong><br/>You reached ${heldToken.value}!</div>`,
+      )
+      .openOn(map);
+  }
+}
+
 function updateStatusPanel() {
-  statusPanelDiv.innerText =
-    `Map initialized — showing deterministic cells.\n${statusText()}`;
+  if (hasWon) {
+    statusPanelDiv.innerText =
+      `🎉 VICTORY! You crafted a token worth ${heldToken?.value}! 🎉\n${statusText()}`;
+  } else {
+    statusPanelDiv.innerText =
+      `Map initialized — showing deterministic cells.\n${statusText()}`;
+  }
 }
 
 updateStatusPanel();
@@ -95,6 +120,8 @@ const MOVEMENT_STEP = TILE_DEGREES * 1; // Move by 1 cell at a time
 
 // Move player marker and update map center
 function movePlayer(latOffset: number, lngOffset: number) {
+  if (hasWon) return; // Disable movement after winning
+
   const currentPos = playerMarker.getLatLng();
   const newPos = leaflet.latLng(
     currentPos.lat + latOffset,
@@ -254,6 +281,11 @@ function drawCellsInView() {
 
       // Click behavior: allow pickup and crafting when interactive
       rect.on("click", () => {
+        if (hasWon) {
+          rect.openPopup();
+          return; // Disable interactions after winning
+        }
+
         const clickKey = key;
         const crafted = craftedCells.get(clickKey);
         const initialHas = luck([i, j, "token"].toString()) < SPAWN_PROBABILITY;
@@ -280,6 +312,7 @@ function drawCellsInView() {
           pickedUpCells.add(clickKey);
           heldToken = { value: nowValue as number };
           updateStatusPanel();
+          checkWinCondition();
 
           // Re-draw cells so all visuals update immediately
           drawCellsInView();
@@ -305,6 +338,7 @@ function drawCellsInView() {
           // Player now holds the new doubled token
           heldToken = { value: newVal };
           updateStatusPanel();
+          checkWinCondition();
 
           // Re-draw cells so the destination disappears immediately
           drawCellsInView();
