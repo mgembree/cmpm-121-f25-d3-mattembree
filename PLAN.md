@@ -22,3 +22,21 @@ Step 3 (Crafting): Allow the player to place tokens onto a cell containing a tok
 Goals:
 
 - The game detects when the player has a token of sufficient value in hand
+
+## D3.B
+
+Step 1 (Map Movement): Allow the player to traverse around the map
+
+Goals:
+
+- The player can move their character about the map or simply scroll the map without moving their character, seeing cells wherever they go.
+
+- As the character moves, only the cells near to their current location are available for interaction.
+
+- Cells should appear to be memoryless in the sense that they forget their state when they are no longer visible on the screen. As a result, the player should be able to farm tokens by moving into and out of the visibility range of a cell. (This behavior will be robustly fixed in the next assignment.)
+
+Step 2 (Win Condition): Allow the player to collect tokens of high enough value to win (4096)
+
+Goals:
+
+- By practicing the collecting and crafting mechanics, the player can now craft a token a value higher than before, and the game now requires that threshold to be reached for victory to be declared
