@@ -44,3 +44,11 @@ This repository contains an interactive map-based token collection game built fo
 - Players must craft tokens up to a value of 4096 to win
 - Victory is declared when the player holds a token ≥ 4096
 - A victory message is displayed and gameplay is disabled upon winning
+
+### D3.C — Persistent State (Complete)
+
+**Persistent Cell Memory:**
+
+- Cells now remember their state even when scrolled off-screen
+- When players return to previously visited areas, cells maintain their modified state
+- Eliminates the "token farming" exploit from D3.B by preserving cell memory

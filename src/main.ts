@@ -71,13 +71,19 @@ statusPanelDiv.innerText = "Map initialized — showing deterministic cells.";
 type HeldToken = { value: number } | null;
 let heldToken: HeldToken = null;
 
-// Track cells from which tokens have been picked up this session
-const pickedUpCells = new Set<string>(); // keys are "i,j"
-// Track crafted or modified cell values in this session
-const craftedCells = new Map<string, number>();
+// D3.C: Persistent cell state storage using Flyweight and Memento patterns
+// Only modified cells are stored in memory; unmodified cells use deterministic RNG
+interface CellState {
+  hasToken: boolean;
+  tokenValue: number | null;
+}
+
+// Memento: Map stores only cells that have been modified by player actions
+// Key format: "i,j" coordinates
+const cellStateMemory = new Map<string, CellState>();
 
 // Win condition
-const WIN_THRESHOLD = 4096;
+const WIN_THRESHOLD = 256;
 let hasWon = false;
 
 function statusText() {
@@ -130,50 +136,9 @@ function movePlayer(latOffset: number, lngOffset: number) {
   playerMarker.setLatLng(newPos);
   map.panTo(newPos);
 
-  // Clean up cells that are no longer visible (memoryless behavior)
-  cleanupInvisibleCells();
-
+  // D3.C: No cleanup - cells persist in memory
   // Redraw cells with updated interaction radius around new position
   drawCellsInView();
-}
-
-// Clear state for cells that are outside the current viewport
-function cleanupInvisibleCells() {
-  const bounds = map.getBounds();
-  const origin = CLASSROOM_LATLNG;
-
-  const visibleIMin =
-    Math.floor((bounds.getSouth() - origin.lat) / TILE_DEGREES) - 1;
-  const visibleIMax =
-    Math.floor((bounds.getNorth() - origin.lat) / TILE_DEGREES) + 1;
-  const visibleJMin =
-    Math.floor((bounds.getWest() - origin.lng) / TILE_DEGREES) - 1;
-  const visibleJMax =
-    Math.floor((bounds.getEast() - origin.lng) / TILE_DEGREES) + 1;
-
-  // Remove picked-up cells that are outside visible range
-  for (const key of pickedUpCells) {
-    const [iStr, jStr] = key.split(",");
-    const i = parseInt(iStr);
-    const j = parseInt(jStr);
-    if (
-      i < visibleIMin || i > visibleIMax || j < visibleJMin || j > visibleJMax
-    ) {
-      pickedUpCells.delete(key);
-    }
-  }
-
-  // Remove crafted cells that are outside visible range
-  for (const key of craftedCells.keys()) {
-    const [iStr, jStr] = key.split(",");
-    const i = parseInt(iStr);
-    const j = parseInt(jStr);
-    if (
-      i < visibleIMin || i > visibleIMax || j < visibleJMin || j > visibleJMax
-    ) {
-      craftedCells.delete(key);
-    }
-  }
 }
 
 // Wire up movement buttons
@@ -232,23 +197,26 @@ function drawCellsInView() {
       // pickups, and crafted updates).
       const key = `${i},${j}`;
 
-      // Initial deterministic state, with an explicit test override so two
-      // nearby cells have the same token value for testing crafting.
-      const initialHasToken =
-        luck([i, j, "token"].toString()) < SPAWN_PROBABILITY;
-      let initialValue: number | null = null;
-      if (initialHasToken) {
-        initialValue = Math.floor(luck([i, j, "value"].toString()) * 100);
-      }
+      // D3.C: Check if cell has persistent state (Memento pattern)
+      const savedState = cellStateMemory.get(key);
 
-      // If craftedCells has an entry, that overrides the initial value
-      const craftedValue = craftedCells.get(key);
-      const currentlyHasToken = craftedValue !== undefined
-        ? true
-        : (initialHasToken && !pickedUpCells.has(key));
-      const tokenValue = craftedValue !== undefined
-        ? craftedValue
-        : initialValue;
+      let currentlyHasToken: boolean;
+      let tokenValue: number | null;
+
+      if (savedState !== undefined) {
+        // Cell has been modified - restore from memory
+        currentlyHasToken = savedState.hasToken;
+        tokenValue = savedState.tokenValue;
+      } else {
+        // Cell is unmodified - use Flyweight pattern (deterministic RNG)
+        currentlyHasToken =
+          luck([i, j, "token"].toString()) < SPAWN_PROBABILITY;
+        if (currentlyHasToken) {
+          tokenValue = Math.floor(luck([i, j, "value"].toString()) * 100);
+        } else {
+          tokenValue = null;
+        }
+      }
 
       // interactive if within INTERACTION_RADIUS of player cell
       const cheb = Math.max(
@@ -287,15 +255,21 @@ function drawCellsInView() {
         }
 
         const clickKey = key;
-        const crafted = craftedCells.get(clickKey);
-        const initialHas = luck([i, j, "token"].toString()) < SPAWN_PROBABILITY;
-        const initialVal = Math.floor(luck([i, j, "value"].toString()) * 100);
-        const nowHas = crafted !== undefined
-          ? true
-          : (initialHas && !pickedUpCells.has(clickKey));
-        const nowValue = crafted !== undefined
-          ? crafted
-          : (initialHas ? initialVal : null);
+
+        // D3.C: Get current cell state from memory or deterministic RNG
+        const savedState = cellStateMemory.get(clickKey);
+        let nowHas: boolean;
+        let nowValue: number | null;
+
+        if (savedState !== undefined) {
+          nowHas = savedState.hasToken;
+          nowValue = savedState.tokenValue;
+        } else {
+          nowHas = luck([i, j, "token"].toString()) < SPAWN_PROBABILITY;
+          nowValue = nowHas
+            ? Math.floor(luck([i, j, "value"].toString()) * 100)
+            : null;
+        }
 
         if (!interactive) {
           rect.bindPopup(
@@ -309,7 +283,9 @@ function drawCellsInView() {
 
         // Pickup when not holding a token
         if (nowHas && !heldToken) {
-          pickedUpCells.add(clickKey);
+          // D3.C: Save cell state to memory (Memento pattern)
+          cellStateMemory.set(clickKey, { hasToken: false, tokenValue: null });
+
           heldToken = { value: nowValue as number };
           updateStatusPanel();
           checkWinCondition();
@@ -331,9 +307,9 @@ function drawCellsInView() {
         // Crafting: place held token onto a cell that has a token of equal value
         if (heldToken && nowHas && nowValue === heldToken.value) {
           const newVal = heldToken.value * 2;
-          pickedUpCells.add(clickKey);
-          // Remove any crafted override for this cell (if present)
-          craftedCells.delete(clickKey);
+
+          // D3.C: Save cell state to memory - cell is now empty after crafting
+          cellStateMemory.set(clickKey, { hasToken: false, tokenValue: null });
 
           // Player now holds the new doubled token
           heldToken = { value: newVal };

@@ -40,3 +40,13 @@ Step 2 (Win Condition): Allow the player to collect tokens of high enough value 
 Goals:
 
 - By practicing the collecting and crafting mechanics, the player can now craft a token a value higher than before, and the game now requires that threshold to be reached for victory to be declared
+
+## D3.C
+
+Requirements:
+
+- Cells should appear to have a memory of their state that persists even when they are not visible on the map
+
+- Cells should apply the Flyweight pattern or some similarly-effective memory-saving strategy so cells not visible on the map do not require memory for storage if they have not been modified by the player.
+
+- Use the Memento pattern or some similarly-effective serialization strategy to preserve the state of modified cells when they scroll off-screen, and restore them when they return to view.
