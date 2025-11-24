@@ -11,8 +11,17 @@ const controlPanelDiv = document.createElement("div");
 controlPanelDiv.id = "controlPanel";
 document.body.append(controlPanelDiv);
 
+// D3.D: Add game controls
+const gameControlsDiv = document.createElement("div");
+gameControlsDiv.innerHTML = `
+  <button id="toggleMovement">Switch to Geolocation</button>
+  <button id="resetGame">🔄 New Game</button>
+`;
+controlPanelDiv.append(gameControlsDiv);
+
 // Add movement buttons to control panel
 const movementDiv = document.createElement("div");
+movementDiv.id = "movementButtons";
 movementDiv.innerHTML = `
   <button id="north">⬆️ North</button>
   <button id="south">⬇️ South</button>
@@ -82,6 +91,184 @@ interface CellState {
 // Key format: "i,j" coordinates
 const cellStateMemory = new Map<string, CellState>();
 
+// D3.D: Facade Pattern - Movement Control Interface
+interface MovementController {
+  start(): void;
+  stop(): void;
+  getName(): string;
+}
+
+class ButtonMovementController implements MovementController {
+  getName(): string {
+    return "Buttons";
+  }
+
+  start(): void {
+    document.getElementById("movementButtons")!.style.display = "block";
+  }
+
+  stop(): void {
+    document.getElementById("movementButtons")!.style.display = "none";
+  }
+}
+
+class GeolocationMovementController implements MovementController {
+  private watchId: number | null = null;
+  private lastLat: number | null = null;
+  private lastLng: number | null = null;
+
+  getName(): string {
+    return "Geolocation";
+  }
+
+  start(): void {
+    document.getElementById("movementButtons")!.style.display = "none";
+
+    if ("geolocation" in navigator) {
+      this.watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const newLat = position.coords.latitude;
+          const newLng = position.coords.longitude;
+
+          // Only update if position changed significantly
+          if (
+            this.lastLat === null || this.lastLng === null ||
+            Math.abs(newLat - this.lastLat) > 0.00001 ||
+            Math.abs(newLng - this.lastLng) > 0.00001
+          ) {
+            this.lastLat = newLat;
+            this.lastLng = newLng;
+
+            const newPos = leaflet.latLng(newLat, newLng);
+            playerMarker.setLatLng(newPos);
+            map.panTo(newPos);
+            drawCellsInView();
+            saveGameState();
+          }
+        },
+        (error) => {
+          console.error("Geolocation error:", error);
+          alert("Unable to access geolocation. Switching to button mode.");
+          toggleMovementMode();
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 10000,
+          timeout: 5000,
+        },
+      );
+    } else {
+      alert("Geolocation not supported. Using button mode.");
+      toggleMovementMode();
+    }
+  }
+
+  stop(): void {
+    if (this.watchId !== null) {
+      navigator.geolocation.clearWatch(this.watchId);
+      this.watchId = null;
+    }
+  }
+}
+
+let currentController: MovementController = new ButtonMovementController();
+let isGeolocationMode = false;
+
+function toggleMovementMode() {
+  currentController.stop();
+  isGeolocationMode = !isGeolocationMode;
+
+  if (isGeolocationMode) {
+    currentController = new GeolocationMovementController();
+    document.getElementById("toggleMovement")!.textContent =
+      "Switch to Buttons";
+  } else {
+    currentController = new ButtonMovementController();
+    document.getElementById("toggleMovement")!.textContent =
+      "Switch to Geolocation";
+  }
+
+  currentController.start();
+  localStorage.setItem(
+    "movementMode",
+    isGeolocationMode ? "geolocation" : "buttons",
+  );
+}
+
+// D3.D: LocalStorage Persistence
+const STORAGE_KEY = "brokenTokenHunterState";
+
+interface GameState {
+  playerLat: number;
+  playerLng: number;
+  heldToken: HeldToken;
+  cellStates: Array<[string, CellState]>;
+  hasWon: boolean;
+  movementMode: string;
+}
+
+function saveGameState() {
+  const pos = playerMarker.getLatLng();
+  const state: GameState = {
+    playerLat: pos.lat,
+    playerLng: pos.lng,
+    heldToken: heldToken,
+    cellStates: Array.from(cellStateMemory.entries()),
+    hasWon: hasWon,
+    movementMode: isGeolocationMode ? "geolocation" : "buttons",
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function loadGameState(): boolean {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (!saved) return false;
+
+  try {
+    const state: GameState = JSON.parse(saved);
+
+    // Restore player position
+    const pos = leaflet.latLng(state.playerLat, state.playerLng);
+    playerMarker.setLatLng(pos);
+    map.setView(pos, MAP_ZOOM);
+
+    // Restore held token
+    heldToken = state.heldToken;
+
+    // Restore cell states
+    cellStateMemory.clear();
+    state.cellStates.forEach(([key, cellState]) => {
+      cellStateMemory.set(key, cellState);
+    });
+
+    // Restore win state
+    hasWon = state.hasWon;
+
+    // Restore movement mode
+    if (state.movementMode === "geolocation" && !isGeolocationMode) {
+      toggleMovementMode();
+    }
+
+    return true;
+  } catch (e) {
+    console.error("Failed to load game state:", e);
+    return false;
+  }
+}
+
+function resetGame() {
+  if (confirm("Start a new game? This will erase your current progress.")) {
+    localStorage.removeItem(STORAGE_KEY);
+    heldToken = null;
+    cellStateMemory.clear();
+    hasWon = false;
+    playerMarker.setLatLng(CLASSROOM_LATLNG);
+    map.setView(CLASSROOM_LATLNG, MAP_ZOOM);
+    updateStatusPanel();
+    drawCellsInView();
+  }
+}
+
 // Win condition
 const WIN_THRESHOLD = 256;
 let hasWon = false;
@@ -139,6 +326,9 @@ function movePlayer(latOffset: number, lngOffset: number) {
   // D3.C: No cleanup - cells persist in memory
   // Redraw cells with updated interaction radius around new position
   drawCellsInView();
+
+  // D3.D: Save state after movement
+  saveGameState();
 }
 
 // Wire up movement buttons
@@ -162,7 +352,15 @@ document.getElementById("reset")!.addEventListener("click", () => {
   playerMarker.setLatLng(CLASSROOM_LATLNG);
   map.setView(CLASSROOM_LATLNG, MAP_ZOOM);
   drawCellsInView();
+  saveGameState();
 });
+
+// D3.D: Wire up new game controls
+document.getElementById("toggleMovement")!.addEventListener(
+  "click",
+  toggleMovementMode,
+);
+document.getElementById("resetGame")!.addEventListener("click", resetGame);
 
 function latLngToCell(origin: leaflet.LatLng, latlng: leaflet.LatLng) {
   const i = Math.floor((latlng.lat - origin.lat) / TILE_DEGREES);
@@ -293,6 +491,9 @@ function drawCellsInView() {
           // Re-draw cells so all visuals update immediately
           drawCellsInView();
 
+          // D3.D: Save state after pickup
+          saveGameState();
+
           // Show popup at the cell center
           const center = cellBounds(CLASSROOM_LATLNG, i, j).getCenter();
           leaflet.popup()
@@ -318,6 +519,9 @@ function drawCellsInView() {
 
           // Re-draw cells so the destination disappears immediately
           drawCellsInView();
+
+          // D3.D: Save state after crafting
+          saveGameState();
 
           const center = cellBounds(CLASSROOM_LATLNG, i, j).getCenter();
           leaflet.popup()
@@ -347,8 +551,16 @@ function drawCellsInView() {
 }
 
 // Draw cells initially and when the map is moved
+// D3.D: Load saved state on startup
+const loadedState = loadGameState();
+if (loadedState) {
+  updateStatusPanel();
+}
 drawCellsInView();
 map.on("moveend", () => drawCellsInView());
+
+// D3.D: Start the movement controller
+currentController.start();
 
 // Also redraw if player marker is moved (future step)
 export { drawCellsInView, map, playerMarker };

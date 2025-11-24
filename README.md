@@ -52,3 +52,24 @@ This repository contains an interactive map-based token collection game built fo
 - Cells now remember their state even when scrolled off-screen
 - When players return to previously visited areas, cells maintain their modified state
 - Eliminates the "token farming" exploit from D3.B by preserving cell memory
+
+**Design Patterns Implemented:**
+
+- **Flyweight Pattern:** Unmodified cells don't consume memory - they use deterministic RNG to regenerate their initial state on-demand
+- **Memento Pattern:** Modified cells serialize their state into a Map for restoration when they scroll back into view
+
+### D3.D — Geolocation & Persistence (Complete)
+
+**Movement System:**
+
+- **Facade Pattern:** Movement control is abstracted behind a `MovementController` interface
+- Two implementations: `ButtonMovementController` (manual controls) and `GeolocationMovementController` (GPS-based)
+- Players can toggle between button-based and geolocation-based movement modes at runtime
+- In geolocation mode, player movement tracks real-world device movement using the browser Geolocation API
+
+**Game State Persistence:**
+
+- Game state is automatically saved to browser localStorage after each action (pickup, craft, movement)
+- State includes: player position, held token, modified cell states, win status, and movement mode
+- Players can close and reopen the page to continue from their last position
+- "New Game" button allows players to reset and start fresh

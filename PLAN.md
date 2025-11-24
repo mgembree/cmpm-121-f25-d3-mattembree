@@ -50,3 +50,27 @@ Requirements:
 - Cells should apply the Flyweight pattern or some similarly-effective memory-saving strategy so cells not visible on the map do not require memory for storage if they have not been modified by the player.
 
 - Use the Memento pattern or some similarly-effective serialization strategy to preserve the state of modified cells when they scroll off-screen, and restore them when they return to view.
+
+## D3.D
+
+Step 1: Software Requirements
+
+Goals:
+
+- The browser geolocation API should be used to control player character movement instead of on-screen buttons.
+
+- The implementation of the new player movement control system should be hidden behind an interface so that most of the game code does not depend on what moves the character. This implementation should embody the Facade design pattern.
+
+- The browser localStorage API should be used to persist game state across page loads.
+
+Step 2: Gameplay Requirements
+
+Goals:
+
+- The player can move their character by moving their device around the real world.
+
+- Even if the player closes the game's page, they should be able to continue gameplay from the same state by simply opening the page again.
+
+- The player needs some way to start a new game.
+
+- The player needs some way to switch between button-based and geolocation-based movement. This can be a runtime control (e.g. an on-screen button) or something that is determined by looking at the page's query string (e.g. index.html?movement=geolocation versus index.html?movement=buttons)
